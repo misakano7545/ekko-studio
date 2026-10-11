@@ -1,0 +1,58 @@
+name: Sync upstream
+
+# Keeps this fork level with EKKOLearnAI/ekko-studio (branch: main).
+#
+# Upstream commits are replayed, never rewritten. main is upstream/main plus
+# this one commit, so rebasing keeps every upstream SHA, author and message
+# exactly as upstream has them, and leaves no merge commit behind.
+#
+# merge-upstream — the API behind GitHub's own "Sync fork" button — cannot be
+# used here: it only fast-forwards, and this workflow file is itself a commit on
+# main, so the branch diverges the moment it is added.
+#
+# shortcut: a rebase conflict (only if upstream ever adds this same file path)
+# fails the run; set -e means main is left untouched.
+#
+# Only main is synced. The other branches are copies of upstream's; re-fetch one
+# from upstream if it has moved.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          # Full history: the merge-base check below is meaningless on a shallow
+          # clone.
+          fetch-depth: 0
+
+      - name: Rebase main onto upstream
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/EKKOLearnAI/ekko-studio.git
+          git fetch --no-tags upstream main
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already level with upstream/main."
+            exit 0
+          fi
+
+          before=$(git rev-parse HEAD)
+          git rebase upstream/main
+          # Explicit lease: the tracking ref may not exist in a fresh checkout.
+          git push --force-with-lease=main:"$before" origin HEAD:main
+          echo "Synced to $(git rev-parse --short upstream/main)."
